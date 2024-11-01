@@ -1,1 +1,1 @@
-# ZillizDemos
+# Miscellaneous AI demos
