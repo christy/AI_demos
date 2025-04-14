@@ -1,0 +1,6 @@
+[tool.poetry]
+# ... other configurations ...
+requires-python = ">=3.8"  # Replace with the minimum Python version your project needs (e.g., ">=3.8", ">=3.9,<3.12")
+[project]
+name = "demo-mcp-streamlit"  # You can replace this with your project name
+version = "0.1.0"           # You can set your project version
