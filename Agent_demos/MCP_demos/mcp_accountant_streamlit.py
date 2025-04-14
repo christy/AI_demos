@@ -1,3 +1,8 @@
+# streamlit_mcp_client_server.py
+# Run this with: streamlit run original_mcp_accountant_streamlit.py
+# If you have uv installed, run this with:
+# uv run --active original_mcp_accountant_streamlit.py
+
 import streamlit as st
 import os, time, tiktoken, asyncio
 # Anthropic async API doc:  
@@ -19,14 +24,35 @@ DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1"
 # GEMINI_MODEL = "gemini-2.5-pro-exp-03-25" #Returned nothing!
 GEMINI_MODEL = "gemini-2.0-flash-thinking-exp-01-21" # works!
 OUTPUT_DIR = "output"
-CLAUDE_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "claude-3-5-haiku-20241022_results.md")
-DEEPSEEK_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "deepseek-ai_results.md")
-GEMINI_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "gemini-2.5-pro-exp-03-25_results.md")
-CLAUDE_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "claude-3-5-haiku-20241022_final_report.md")
-DEEPSEEK_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "deepseek-ai_final_report.md")
-GEMINI_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "gemini-2.5-pro-exp-03-25_final_report.md")
+# Update file names to match actual files in output directory
+CLAUDE_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "claude_results.md")
+DEEPSEEK_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "deepseek_results.md")
+GEMINI_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "gemini_results.md")
+# Update final report file names to match consistent naming convention
+CLAUDE_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "claude_final_report.md")
+DEEPSEEK_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "deepseek_final_report.md")
+GEMINI_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "gemini_final_report.md")
 
 ## HELPER FUNCTIONS
+
+def load_prompt_resources(prompt_dir="data") -> Dict[str, str]:
+    """Loads prompt templates from files from the specified directory and returns them as a dictionary."""
+    prompt_resources = {}
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    template_files = {
+        "analysis_prompt": "prompt_template.txt",  # Resource name: filename
+        "combine_prompt": "prompt_combine.txt",   # Resource name: filename
+    }
+
+    for resource_name, filename in template_files.items():
+        template_path = os.path.join(current_dir, prompt_dir, filename) # Use prompt_dir here
+        template_content = read_file(template_path)
+        if template_content:
+            prompt_resources[resource_name] = template_content
+        else:
+            st.error(f"Failed to load prompt template from {filename} in directory '{prompt_dir}'") # Updated error message
+    return prompt_resources
 
 def read_file(file_path: str) -> str:
     try:
@@ -91,21 +117,12 @@ def get_form_990_texts_from_input(num_docs: int, default_texts: Optional[List[st
         st.error(f"Error getting Form 990 texts: {str(e)}")
         return []
 
-def generate_prompt_from_template(prompt_file: str, docs: List[str]) -> Optional[str]:
-    """Generate analysis prompt from a specified template file.
-
-    Args:
-        prompt_file (str): The name of the template file to use.
-        docs (List[str]): A list of document contents.
-
-    Returns:
-        Optional[str]: The generated prompt, or None if an error occurs.
-    """
+def generate_prompt(resource_name: str, docs: List[str]) -> Optional[str]:
+    """Generates analysis prompt using a loaded prompt resource."""
     try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        template_path = os.path.join(current_dir, "data", prompt_file)  # Use the prompt_file parameter
-        prompt_template = read_file(template_path)
+        prompt_template = st.session_state.prompt_resources.get(resource_name) # Get from resources
         if not prompt_template:
+            st.error(f"Prompt resource '{resource_name}' not found.")
             return None
 
         doc_dict = {f'doc{i+1}': doc for i, doc in enumerate(docs)}
@@ -113,12 +130,9 @@ def generate_prompt_from_template(prompt_file: str, docs: List[str]) -> Optional
             doc_dict[f'doc{i}'] = ""
 
         assembled_prompt = prompt_template.format(**doc_dict)
-        token_count = count_tokens(assembled_prompt)
-        st.info(f"Number of tokens in the prompt: {token_count}")
-        st.expander("To debug: view full prompt").text_area(label='', value=assembled_prompt, height=400, disabled=True)
         return assembled_prompt
     except Exception as e:
-        st.error(f"Error generating prompt: {str(e)}")
+        st.error(f"Error generating prompt from resource '{resource_name}': {str(e)}")
         return None
     
 def count_tokens(text: str) -> int:
@@ -147,17 +161,25 @@ def save_results(output_file: str, model: str, content: str) -> None:
     except Exception as e:
         st.error(f"Error saving results to {output_file}: {str(e)}")
 
-def display_report(report_content: str, report_type: str, is_error: bool = False) -> None:
+def display_report(report_content: str, report_type: str, is_error: bool = False, is_cached: bool = False) -> None:
     """Display a report in Streamlit.
 
     Args:
         report_content (str): The content of the report.
         report_type (str): The type of report (e.g., "Final Report").
         is_error (bool): Whether the report indicates an error.
+        is_cached (bool): Whether the report was loaded from cache.
     """
     if report_content and not is_error:
-        st.write(f"{report_type}:")
-        st.write(report_content)
+        st.subheader(report_type)
+        if is_cached:
+            st.success(f"{report_type} loaded from cache")
+        else:
+            st.success(f"{report_type} generated successfully")
+        
+        with st.expander(f"View {report_type}", expanded=True):
+            st.markdown(report_content)
+        
         if report_type == "Final Report":
             st.info(f"The final report has been saved.")
     elif is_error:
@@ -177,9 +199,9 @@ async def run_analysis(prompt: str):
 
     # Initialize which models to use in analysis step
     models = {
-        "claude": "claude-3-5-haiku-20241022",
-        "deepseek": "deepseek-ai/DeepSeek-R1",
-        # "gemini": "gemini-2.0-flash-thinking-exp-01-21",
+        # "claude": "claude-3-5-haiku-20241022",
+        # "deepseek": "deepseek-ai/DeepSeek-R1",
+        "gemini": "gemini-2.0-flash-thinking-exp-01-21",
     }
     # Initialize clients outside the loop
     # anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
@@ -193,10 +215,34 @@ async def run_analysis(prompt: str):
         "gemini": google_client,
     }
 
+    # Map model names to output files
+    output_file_map = {
+        "claude": CLAUDE_OUTPUT_FILE,
+        "deepseek": DEEPSEEK_OUTPUT_FILE,
+        "gemini": GEMINI_OUTPUT_FILE,
+    }
+    
     # Add all LLM calls to tasks list
     for name, model in models.items():
         client = client_map.get(name)
+        output_file = output_file_map.get(name)
+        
+        # Check if output file already exists
+        if os.path.exists(output_file):
+            st.success(f"Using existing {name} output file: {output_file}")
+            content = read_file(output_file)
+            if content:
+                # Add cached result directly to results
+                cached_result = {"content": content, "duration": 0, "error": None, "model_name": name, "cached": True}
+                results.append(cached_result)
+                # Also add the content to report_docs for final report generation
+                report_docs.append(content)
+                continue
+            else:
+                st.warning(f"Existing file {output_file} is empty or couldn't be read. Generating new content.")
+        
         if client: # Only create task if client is initialized
+            st.info(f"Calling {name} API to generate content...")
             task = asyncio.create_task(
                 analyze_with_model(client, prompt, model, name)
             )
@@ -226,16 +272,24 @@ async def run_analysis(prompt: str):
     for result in results:
         if result:
             name = result.get("model_name", "Unknown") # Try to get model name
-            st.subheader(f"{name.capitalize()} Analysis")
+            is_cached = result.get("cached", False)
+            if is_cached:
+                st.subheader(f"{name.capitalize()} Analysis (Loaded from Cache)")
+            else:
+                st.subheader(f"{name.capitalize()} Analysis")
+                
             if result.get("error"):
                 st.error(f"Error: {result['error']}")
             else:
                 duration = result.get("duration", "N/A")
-                st.info(f"{name.capitalize()} took {duration:.2f} seconds.")
+                if is_cached:
+                    st.success("✓ Loaded from cache (no API call made)")
+                else:
+                    st.info(f"{name.capitalize()} took {duration:.2f} seconds.")
                 content = result.get("content", "")
-                # Save the result to a file
-                filename = f"{name.replace('/', '_')}_results.md"
-                filepath = os.path.join(output_dir, filename)
+                # Save the result to a file using consistent naming
+                filename = f"{name}_results.md"  # Simplified naming to match our constants
+                filepath = output_file_map.get(name)  # Use the same file path defined in our map
                 try:
                     with open(filepath, "w") as f:
                         f.write(f"# {name.capitalize()} Analysis Result\n\n")
@@ -244,9 +298,9 @@ async def run_analysis(prompt: str):
                 except Exception as e:
                     st.error(f"Error saving {name.capitalize()} result: {e}")
 
-                # Create a debug collapsed button
-                with st.expander(f"To inspect {name.capitalize()} result"):
-                    st.text_area(label='', value=content, height=400, disabled=True)
+                # Create a debug collapsed button that can be expanded if needed
+                with st.expander(f"To inspect {name.capitalize()} result{' (cached)' if is_cached else ''}", expanded=False):
+                    st.text_area(label='Analysis Content', value=content, height=400, disabled=True)
 
     return report_docs # <--- Return concatted different LLM analysis reports
 
@@ -306,39 +360,78 @@ async def analyze_with_model(client: Any, prompt: str, model: str, model_name: s
     except Exception as e:
         return {"error": f"Error calling analyze_documents for {model}: {e}", "duration": time.time() - start_time, "content": "", "model_name": model_name}
 
-async def run_final_report(prompt_file, report_docs: List[str], selected_model: str): # <-- Add selected_model
+async def run_final_report(prompt_file, report_docs: List[str], selected_model: str): 
     """Generates the final report using the selected model."""
-    final_report_prompt = generate_prompt_from_template(prompt_file, report_docs)
+    # Display which model was selected for the final report
+    st.info(f"Generating final report using model: {selected_model}")
+    
+    final_report_prompt = generate_prompt(prompt_file, report_docs)
     if not final_report_prompt:
         st.error("Could not generate final report prompt.")
         return {"error": "Could not generate final report prompt.", "content": ""}
+    
+    # Display the final report prompt for debugging purposes
+    st.subheader("Final Report Prompt (for debugging)")
+    token_count = count_tokens(final_report_prompt)
+    st.info(f"Final report token count: {token_count}")
+    with st.expander("View Final Report Prompt", expanded=False):
+        st.markdown(final_report_prompt)
 
-    if selected_model == CLAUDE_MODEL:
-        client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-        output_file = CLAUDE_FINAL_REPORT_FILE
-    elif selected_model == DEEPSEEK_MODEL:
-        client = Together(api_key=TOGETHER_API_KEY) if TOGETHER_API_KEY else None
-        output_file = DEEPSEEK_FINAL_REPORT_FILE
-    elif selected_model == GEMINI_MODEL:
-        # client = genai.GenerativeModel(GEMINI_MODEL, google_api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
-        client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
-        output_file = GEMINI_FINAL_REPORT_FILE
-    else:
+    # Map models to clients and output files
+    model_to_client = {
+        CLAUDE_MODEL: AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None,
+        DEEPSEEK_MODEL: Together(api_key=TOGETHER_API_KEY) if TOGETHER_API_KEY else None,
+        GEMINI_MODEL: genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+    }
+    
+    # Map models to final report files
+    model_to_output_file = {
+        CLAUDE_MODEL: CLAUDE_FINAL_REPORT_FILE,
+        DEEPSEEK_MODEL: DEEPSEEK_FINAL_REPORT_FILE,
+        GEMINI_MODEL: GEMINI_FINAL_REPORT_FILE
+    }
+    
+    # Get client and output file for selected model
+    client = model_to_client.get(selected_model)
+    output_file = model_to_output_file.get(selected_model)
+    
+    # Check if model is supported
+    if not client or not output_file:
         st.error(f"Unsupported model selected for final report: {selected_model}")
         return {"error": f"Unsupported model selected for final report: {selected_model}", "content": ""}
 
-    if not client:
+    # This check is now redundant since we already check for client in the previous if statement
+    # But keeping a specific error message for missing API keys is helpful
+    if not client and selected_model in [CLAUDE_MODEL, DEEPSEEK_MODEL, GEMINI_MODEL]:
         st.error(f"API key missing for selected model: {selected_model}")
         return {"error": f"API key missing for selected model: {selected_model}", "content": ""}
-
-    final_report_result = await analyze_with_model(client, final_report_prompt, selected_model, selected_model) # Re-use analyze_with_model
+    
+    # Check if output file already exists
+    if os.path.exists(output_file):
+        st.success(f"Using existing output file: {output_file}")
+        content = read_file(output_file)
+        if content:
+            # Don't display the report here, let the caller handle it with display_report
+            return {"content": content, "duration": 0, "error": None, "model_name": selected_model, "cached": True}
+        else:
+            st.warning(f"Existing file {output_file} is empty or couldn't be read. Generating new content.")
+    
+    # If file doesn't exist or couldn't be read, call the LLM
+    st.info(f"Calling {selected_model} API to generate content...")
+    final_report_result = await analyze_with_model(client, final_report_prompt, selected_model, selected_model) 
     if not final_report_result.get("error"):
         save_results(output_file, selected_model, final_report_result["content"])
+        # Don't display the report here, let the caller handle it with display_report
     return final_report_result
 
 if __name__ == "__main__":
 
     st.title("Form 990 Analysis Tool")
+
+    # Load prompt resources at the start
+    if 'prompt_resources' not in st.session_state:
+        st.session_state.prompt_resources = \
+            load_prompt_resources(prompt_dir="data")
 
     # Sidebar for Model Selection
     st.sidebar.header("Model Configuration")
@@ -377,25 +470,47 @@ if __name__ == "__main__":
     # User pushes Compose Prompt when done editing docs.
     # For debugging purposes, the prompt is shown before launching workflow.
     if st.button("Compose the Prompt"):
-        prompt = generate_prompt_from_template("prompt_template.txt", docs)
+        # Use resource name "analysis_prompt"
+        prompt = generate_prompt("analysis_prompt", docs)
         if prompt:
             st.session_state.prompt = prompt
+            st.session_state.prompt_token_count = count_tokens(prompt)
+
+    # Always display the initial prompt and token count if present in session_state
+    if 'prompt' in st.session_state and st.session_state.prompt:
+        st.subheader("Initial Accountant Prompt (for debugging)")
+        st.info(f"Initial prompt token count: {st.session_state.get('prompt_token_count', 'N/A')}")
+        with st.expander("View Initial Accountant Prompt", expanded=False):
+            st.markdown(st.session_state.prompt)
+
 
     # Button to run the analysis (only shown after the prompt is composed) 
     if 'prompt' in st.session_state and st.session_state.prompt:
+
         if st.button("Run Analysis (Async Parallel 3 Models)"):
+            # Set session state to track that we're running analysis
+            st.session_state.running_analysis = True
             report_docs = asyncio.run(run_analysis(st.session_state.prompt)) # Capture report_docs
-
-        # DEBUGGING WITH CLAUDE DESKTOP
-        # st.info("Prompt composed. You can now use this prompt in Claude Desktop to call the 'analyze_documents' tool.")
-        # st.text_area("Prompt for Claude Desktop (copy and paste into Claude)", value=st.session_state.prompt, height=200, disabled=True)
-
+            
             # Generate and display final report after async analysis is done
             if report_docs:
-                # Assemble the final report prompt
-                final_report_result = asyncio.run(run_final_report("prompt_combine.txt", report_docs, selected_model))
-                display_report(final_report_result.get("content", ""),
-                               "Final Report",
-                               final_report_result.get("error") is not None)
-            else:
-                st.error("No analysis results to generate final report.")
+                # Show which model was selected for the final report
+                st.subheader("Final Report Generation")
+                st.info(f"Selected model for final report: {selected_model}")
+                
+                # Assemble the final report prompt, use resource name "combine_prompt"
+                final_report_result = asyncio.run(run_final_report("combine_prompt", report_docs, selected_model))
+                if final_report_result.get("error"):
+                    st.error(f"Error generating final report: {final_report_result['error']}")
+                else:
+                    # Display the final report to the user
+                    st.subheader("Final Report")
+                    if final_report_result.get("cached", False):
+                        st.success("Final report loaded from cache")
+                    else:
+                        st.success("Final report generated successfully")
+                    
+                    with st.expander("View Final Report", expanded=True):
+                        st.markdown(final_report_result.get("content", ""))
+                    
+                    st.info("The final report has been saved.")
