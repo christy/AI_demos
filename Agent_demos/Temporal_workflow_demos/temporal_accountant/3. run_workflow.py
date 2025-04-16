@@ -1,21 +1,21 @@
 # main.py
-# This file is responsible for starting the AccountantWorkflow by submitting it to Temporal
+# This file is responsible for starting the AccountantWorkflow by submitting it to Temporal.
+# This is the User's Application: requests workflow code execution and handles results.
+# Client communicates with Worker and Server?
 
 import asyncio
 import time
 import traceback
 import os
-
+# Import temporal libraries
 from temporalio.client import Client, WorkflowFailureError
-
 # Import user's application logic
 from shared import AccountantInput  # data classes
 from workflows import AccountantWorkflow  # workflow
 
-# TODO: move this to shared
+# TODO: move this to a shared config file
 # Temporal uses task queues to route workflows and activities to worker processes.
-# Define a task queue name
-ACCOUNTANT_TASK_QUEUE_NAME = "accountant-task-queue"
+ACCOUNTANT_TASK_QUEUE_NAME = "accountant-tasks"
 
 async def main():
     """Runs the Forensic Accounting Workflow."""
@@ -98,22 +98,35 @@ async def main():
     print(f"Generated workflow ID: {workflow_id}")
     
     try:
-        print(f"Executing workflow with task queue: {ACCOUNTANT_TASK_QUEUE_NAME}")
-        print(f"Executing workflow with ID: {workflow_id}")
+        print(f"Starting workflow with task queue: {ACCOUNTANT_TASK_QUEUE_NAME}")
+        print(f"Starting workflow with ID: {workflow_id}")
         
-        # Execute the workflow
-        # Specify the workflow to execute: AccountantWorkflow.run.
-    # Passes the input data: analysis_input.
-    # Assigns the workflow to the task queue: ACCOUNTING_TASK_QUEUE_NAME.
+        # Execute the workflow synchronously.
+        # Workflow to execute: AccountantWorkflow.run.
+        # Input data: accountant_input.
+        # Assign the workflow to the task queue workers: ACCOUNTANT_TASK_QUEUE_NAME.
+        # Wait for workflow to actually run! (This is a blocking call)
         workflow_result = await client.execute_workflow(
             AccountantWorkflow.run,  # Reference the workflow's run method
-            accountant_input,        # Pass the input data
-            id=workflow_id,          # Unique workflow ID
+            accountant_input,  # Pass the input data
             task_queue=ACCOUNTANT_TASK_QUEUE_NAME,
+            id=workflow_id,          # Unique workflow ID
         )
+        print(f"\nWorkflow completed successfully!{workflow_result}")
 
-        print(f"\nWorkflow completed successfully!")
-        print(f"\nWorkflow result: {workflow_result}")
+        # # Execute the workflow asynchronously.
+        # # Specify the workflow to execute: AccountantWorkflow.run.
+        # # Pass in input data: accountant_input.
+        # # Assigns the workflow to the task queue: ACCOUNTANT_TASK_QUEUE_NAME.
+        # # Non-blocking call get the future from handle.
+        # handle = await client.start_workflow(
+        #     AccountantWorkflow.run,  # Reference the workflow's run method
+        #     accountant_input,   # Pass the input data
+        #     task_queue=ACCOUNTANT_TASK_QUEUE_NAME,
+        #     id=workflow_id,           # Unique workflow ID
+        # )
+        # result = await handle.result()
+        # print(f"\nWorkflow completed successfully! {result}")
         
         # Note: The prompts and token counts are now logged in the worker's logs
         # rather than being returned directly in the workflow result

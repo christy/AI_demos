@@ -13,12 +13,21 @@ from together import Together
 from google import genai
 from google.genai import types
 
+# DEBUG INFO: todo delete
+import importlib.metadata
+import temporalio, anthropic
+print(f"temporalio: {temporalio.__version__}")
+print(f"anthropic: {anthropic.__version__}")
+print(f"together: {importlib.metadata.version('together')}")
+print(f"google-generativeai: {importlib.metadata.version('google-generativeai')}")
+
 # api keys (Consider secure way to manage API keys in production)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Constants (Move constants to shared.py or config if needed for workflow too)
+# TODO: move this to a shared config file
+# Constants
 CLAUDE_MODEL = "claude-3-5-haiku-20241022"
 DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1"
 GEMINI_MODEL = "gemini-2.0-flash-thinking-exp-01-21"

@@ -1,16 +1,17 @@
 # run_worker.py
-import asyncio
+# Client communicates with User's Application and Temporal Server?
 
+import asyncio
 # Import temporal libraries
 from temporalio.client import Client
 from temporalio.worker import Worker
-
 # Import user's application logic
 from workflows import AccountantWorkflow
 from activities import AccountantActivities
 
-# Define the task queue name
-ACCOUNTANT_TASK_QUEUE_NAME = "accountant-task-queue"
+# TODO: move this to a shared config file
+# Temporal uses task queues to route workflows and activities to worker processes.
+ACCOUNTANT_TASK_QUEUE_NAME = "accountant-tasks"
 
 async def main():
     """Starts the Temporal Worker to execute activities and workflows."""

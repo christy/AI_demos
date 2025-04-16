@@ -15,9 +15,10 @@ from temporalio.exceptions import ActivityError
 # Import data classes for the workflow
 from shared import AccountantInput  # data classes
 
-# Import activities interface for type hinting only
+# Add pass throughs here, so sandbox does not reimport libraries every time.
+# Standard Python and temporalio import are automatically passed through.
 with workflow.unsafe.imports_passed_through():
-    from activities import AccountantActivities  # Import your activities class for type hinting
+    from activities import AccountantActivities
 
 # Decorator marks AccountantWorkflow as a Temporal workflow.
 @workflow.defn
@@ -205,20 +206,10 @@ class AccountantWorkflow:
             workflow.logger.warning("Failed to convert final report to PDF")
             pdf_path = "Conversion failed"
 
-        workflow.logger.info("Accountant Workflow completed") # Log workflow completion
-
-        # We need to return a string as per the function signature
-        # Store the prompts and token counts in workflow.info.memo for retrieval later if needed
-        workflow.upsert_memo({
-            "initial_prompt": prompt,
-            "initial_token_count": initial_token_count,
-            "final_report_prompt": final_report_prompt,
-            "final_token_count": token_count
-        })
-        
         # Log the prompts and token counts for visibility
+        workflow.logger.info("Accountant Workflow completed") # Log workflow completion
         workflow.logger.info(f"Initial prompt token count: {initial_token_count}")
         workflow.logger.info(f"Final report prompt token count: {token_count}")
         
         # Return a string summary as required by the function signature
-        return f"Accountant Workflow completed. Check 'output' directory for results. Final report PDF: {pdf_path}"
+        return f"Accountant Workflow completed. Check 'output' directory for final report PDF: {pdf_path}"
