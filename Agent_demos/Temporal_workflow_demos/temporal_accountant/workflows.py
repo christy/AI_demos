@@ -19,6 +19,7 @@ from shared import AccountantInput  # data classes
 # Standard Python and temporalio import are automatically passed through.
 with workflow.unsafe.imports_passed_through():
     from activities import AccountantActivities
+    from activities import REVERSE_MODEL_NAMES
 
 # Decorator marks AccountantWorkflow as a Temporal workflow.
 @workflow.defn
@@ -123,16 +124,22 @@ class AccountantWorkflow:
         # Use a fixed output directory path that will be resolved by the activity
         output_dir = "output"
         workflow.logger.info(f"Using output directory: {output_dir}")
+        # Use REVERSE_MODEL_NAMES from activities.py
+        from activities import REVERSE_MODEL_NAMES
         for result in analysis_results:
-            if result and result.get("content"): # Check if result is valid and has content
-                filename = f"{result.get('model_name', 'unknown')}_results.md"
-                filepath = f"{output_dir}/{filename}"
+            if result and result.get("content"):
+                # Ensure model_key is the short key
+                model_name = result.get('model_name', 'unknown')
+                model_key = model_name
+                # If model_name looks like a full model name, map to short key
+                if model_name not in ("claude", "deepseek", "gemini"):
+                    model_key = REVERSE_MODEL_NAMES.get(model_name, "unknown")
                 await workflow.execute_activity(
                     "save_results_activity",
-                    args=[filepath, result.get('model_name', 'unknown'), result["content"]],
+                    args=[model_key, result["content"], "analysis"],
                     retry_policy=retry_policy,
                     schedule_to_close_timeout=timedelta(seconds=30),
-                ) # Save each model's result
+                )
 
         workflow.logger.info("Individual results saved successfully")
 
@@ -171,41 +178,27 @@ class AccountantWorkflow:
             retry_policy=retry_policy,
             schedule_to_close_timeout=timedelta(seconds=30),
         )
-
         workflow.logger.info("Final report generated successfully")
 
-        # 7. Save Final Report to a file
-        workflow.logger.info("Step 7: Saving final report")
-        final_report_filename = f"{accountant_input.selected_model_for_final_report.replace('/', '_')}_final_report.md"
-        final_report_filepath = f"{output_dir}/{final_report_filename}"
-        await workflow.execute_activity(
-            "save_results_activity",
-            args=[
-                final_report_filepath, 
-                accountant_input.selected_model_for_final_report, 
-                # Save final report
-                final_report_result.get("content", "Final Report Generation Failed")
-            ],
-            retry_policy=retry_policy,
-            schedule_to_close_timeout=timedelta(seconds=30),
-        )
+        # 7. Convert the final report to HTML and PDF
+        selected_model_full = accountant_input.selected_model_for_final_report
+        model_key = selected_model_full
+        if selected_model_full not in ("claude", "deepseek", "gemini"):
+            model_key = REVERSE_MODEL_NAMES.get(selected_model_full, "unknown")
 
-        # 8. Convert the final report to HTML and PDF
-        workflow.logger.info("Step 8: Converting final report to HTML and PDF")
-        conversion_result = await workflow.execute_activity(
-            "convert_markdown_to_pdf_activity",
-            arg=final_report_filepath,
+        await workflow.execute_activity(
+            "save_final_report_activity",
+            args=[model_key, final_report_result.get("content", "Final Report Generation Failed")],
             retry_policy=retry_policy,
             schedule_to_close_timeout=timedelta(seconds=60),
         )
+        workflow.logger.info("Final report saved in Markdown, HTML, and PDF formats (see output directory).")
         
-        if conversion_result and "pdf_path" in conversion_result:
-            workflow.logger.info(f"Final report converted to PDF: {conversion_result['pdf_path']}")
-            pdf_path = conversion_result["pdf_path"]
-        else:
-            workflow.logger.warning("Failed to convert final report to PDF")
-            pdf_path = "Conversion failed"
-
+        # PDF and HTML paths can be found using the FINAL_REPORT_HTML_FILES and FINAL_REPORT_PDF_FILES constants in activities.py.
+        with workflow.unsafe.imports_passed_through():
+            from activities import FINAL_REPORT_PDF_FILES
+        pdf_path = FINAL_REPORT_PDF_FILES[model_key]
+        
         # Log the prompts and token counts for visibility
         workflow.logger.info("Accountant Workflow completed") # Log workflow completion
         workflow.logger.info(f"Initial prompt token count: {initial_token_count}")

@@ -1,38 +1,26 @@
-# Migrating AI Agentic Tasks to Temporal: A Form 990 Analysis Case Study
-
-This document outlines the process and rationale for migrating a Form 990 document analysis tool from a basic Streamlit + background script architecture to a robust Temporal workflow.
+# Converting a Forensic Accounting AI Agent to Temporal
 
 ## The Original Problem
 
-We needed a tool to analyze the raw text content of multiple IRS Form 990 documents from the same organization over several years. The goal was to leverage multiple Large Language Models (LLMs) for analysis, compare their outputs, and present the findings through a simple web interface.
+For Nonprofits and public companies, IRS forms are publicly available.  But IRS forms are hard for humans to read and analyze.  The original AI code uses 3 different LLMs to generate analysis and insights, as if you had 3 Junior Forensic Accountants working on the same task.  After they are finished, the code combine the best of their results into a final report.
 
 ## "Before": The Streamlit + MCP Approach
 
 Our initial solution consisted of:
 
-1.  **Streamlit Frontend (`demo_mcp_streamlit/main.py`):** Provided the UI for users to paste Form 990 text, configure analysis, trigger the process, and view results. It used `asyncio.gather` to manage parallel requests to the backend.
+1.  **Streamlit Frontend (`utils/mcp_client.py`):** Provided the UI for users to paste Form 990 text, configure analysis, trigger the process, and view results. It used `asyncio.gather` to manage parallel requests to the backend.
 2.  **MCP Server (`utils/mcp_server.py`):** A Python script acting as a "tool server" using the Multi-Claude Protocol (MCP) library (`FastMCP`). It exposed tools like `analyze_documents` which would contain the logic to call different LLM APIs.
-3.  **Communication (`utils/mcp_client.py` & `stdio`):** The Streamlit app communicated with the MCP server via standard input/output (`stdio`) piping. The `MCPClient` class handled sending JSON requests and receiving JSON responses over this pipe.
+3.  **LLMs used were:** Claude, DeepSeek, and Gemini
 
 **(Include simple diagram of the "Before" architecture here)**
 
 ### Challenges Encountered
 
-While functional for simple cases, this architecture presented significant challenges for reliability and scalability:
+1. MCP Client/Server mapping to Temporal Server, Workers, Cluster is not a clear mapping.
+2. Removed complexity of MCP Client/Server into Streamlit application.
+3. Mapping Streamlit Client to Temporal Server, Workers, Cluster is not a clear mapping.  I think it requires creating a new Activity to handle Streamlit.
+4. Due to time constraints, I did not implement the Streamlit Client to Temporal Server, Workers, Cluster mapping.
 
-* **State Management:** The state of the analysis (e.g., which LLM calls were complete) existed only in the memory of the running Streamlit/MCP processes. A crash or restart meant losing all progress. Resuming was not possible.
-* **Failure Handling:**
-    * The `stdio` connection was fragile.
-    * Transient errors (like LLM API timeouts or rate limits) required complex, custom retry logic within the application code.
-    * If the MCP server died, the Streamlit app would fail the request with no built-in recovery.
-* **Scalability:** The single-process MCP server and the `stdio` communication method created bottlenecks. Scaling required manual intervention and complex process management. Long-running LLM calls could block resources.
-* **Observability:** Debugging issues across the process and `stdio` boundary was difficult. Tracking the progress of a multi-step analysis was opaque.
-
-## "After": Migrating to Temporal Workflows
-
-To address these limitations, we migrated the core analysis logic to Temporal. Temporal is an open-source, durable execution system designed for orchestrating long-running, reliable applications.
-
-**(Include simple diagram of the "After" architecture here)**
 
 ### Key Temporal Concepts Used
 
@@ -59,16 +47,23 @@ To address these limitations, we migrated the core analysis logic to Temporal. T
 * **Scalability:** Workers can be scaled independently to handle increased load. The Cluster manages task distribution. Temporal easily handles long-running tasks without blocking the client.
 * **Observability:** Temporal Web UI provides detailed visibility into workflow execution history, current state, inputs/outputs of each step, errors, and retry attempts.
 
+## "After": Migrating to Temporal Workflows
+
+To address these limitations, we migrated the core analysis logic to Temporal. Temporal is an open-source, durable execution system designed for orchestrating long-running, reliable applications.
+
+**(Include simple diagram of the "After" architecture here)**
+
 ### Code Structure (`After` Version)
 
 * **`shared.py`:** Dataclasses for workflow inputs/outputs.
-* **`activities.py`:** Contains functions decorated with `@activity.defn`. These perform the actual work (e.g., LLM calls).
+* **`activities.py`:** Contains functions decorated with `@activity.defn`. These perform the actual work (e.g., LLM calls, save files).
 * **`workflow.py`:** Contains the class decorated with `@workflow.defn`. This orchestrates calls to activities. Note the use of `workflow.execute_activity` and standard Python `asyncio.gather` *within* the workflow definition for parallelism.
 * **`run_worker.py`:** Script to start a Temporal Worker process that hosts the workflow and activity code.
 * **`start_workflow.py`:** Example script to trigger the workflow execution using the Temporal client.
 
 ### Trade-offs
 
+* **User's client/server mappings:**  Extra steps required to map Streamlit and MCP client/server to Temporal server/worker/cluster.
 * **Infrastructure:** Requires running the Temporal Cluster and Worker processes.
 * **Learning Curve:** Involves understanding Temporal concepts and SDKs.
 * **Complexity:** Adds an orchestration layer, which might be overkill for extremely simple tasks but provides immense value for complex, long-running, or critical processes.
@@ -82,6 +77,7 @@ Migrating the Form 990 analysis task from a script-based approach to Temporal si
 1.  **Setup Temporal:** Start a local Temporal development cluster (e.g., using `temporal server start-dev`) or connect to Temporal Cloud.
 2.  **Install Dependencies:** `pip install temporalio pydantic requests anthropic together google-generativeai ...`
 3.  **Set Environment Variables:** Export `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `GOOGLE_API_KEY`.
-4.  **Run Worker:** `python run_worker.py` (Keep this running in one terminal)
-5.  **Start Workflow:** `python start_workflow.py` (Run in another terminal to trigger an execution)
-6.  **Observe:** Monitor progress via the Worker logs and the Temporal Web UI (usually `http://localhost:8233`).
+4. **Start Server:** temporal server start-dev
+5.  **Run Worker:** `python run_worker.py` (Keep this running in one terminal)
+6.  **Start Workflow:** `python start_workflow.py` (Run in another terminal to trigger an execution)
+7.  **Observe:** Monitor progress via the Worker logs and the Temporal Web UI (usually `http://localhost:8233`).

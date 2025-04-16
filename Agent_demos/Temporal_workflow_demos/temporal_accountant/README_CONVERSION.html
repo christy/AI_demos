@@ -1,0 +1,86 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Converted from: README_CONVERSION.md</title>
+    <meta charset="utf-8"/>
+
+</head>
+<body>
+
+<h1 id="heading-converting-a-forensic-accounting-ai-agent-to-temporal">Converting a Forensic Accounting AI Agent to Temporal</h1>
+<h2 id="heading-the-original-problem">The Original Problem</h2>
+<p>For Nonprofits and public companies, IRS forms are publicly available.  But IRS forms are hard for humans to read and analyze.  The original AI code uses 3 different LLMs to generate analysis and insights, as if you had 3 Junior Forensic Accountants working on the same task.  After they are finished, the code combine the best of their results into a final report.</p><h2 id="heading-22before223a-the-streamlit-2b-mcp-approach">&quot;Before&quot;: The Streamlit + MCP Approach</h2>
+<p>Our initial solution consisted of:</p><ol data-line="10" class="code-line" dir="auto">
+<li><strong>Streamlit Frontend (<code>utils/mcp_client.py</code>):</strong> Provided the UI for users to paste Form 990 text, configure analysis, trigger the process, and view results. It used <code>asyncio.gather</code> to manage parallel requests to the backend.</li>
+<li><strong>MCP Server (<code>utils/mcp_server.py</code>):</strong> A Python script acting as a &quot;tool server&quot; using the Multi-Claude Protocol (MCP) library (<code>FastMCP</code>). It exposed tools like <code>analyze_documents</code> which would contain the logic to call different LLM APIs.</li>
+<li><strong>LLMs used were:</strong> Claude, DeepSeek, and Gemini</li>
+</ol>
+<p><strong>(Include simple diagram of the &quot;Before&quot; architecture here)</strong></p><h3 id="heading-challenges-encountered">Challenges Encountered</h3>
+<ol data-line="18" class="code-line" dir="auto">
+<li>MCP Client/Server mapping to Temporal Server, Workers, Cluster is not a clear mapping.</li>
+<li>Removed complexity of MCP Client/Server into Streamlit application.</li>
+<li>Mapping Streamlit Client to Temporal Server, Workers, Cluster is not a clear mapping.  I think it requires creating a new Activity to handle Streamlit.</li>
+<li>Due to time constraints, I did not implement the Streamlit Client to Temporal Server, Workers, Cluster mapping.</li>
+</ol>
+<h3 id="heading-key-temporal-concepts-used">Key Temporal Concepts Used</h3>
+<ul data-line="26" class="code-line" dir="auto">
+<li><strong>Workflow (<code>workflow.py:DocumentAnalysisWorkflow</code>):</strong> Defines the <em>orchestration</em> logic – the sequence of steps involved in the analysis. This code is durable; Temporal ensures it runs to completion, preserving state even if workers crash.</li>
+<li><strong>Activity (<code>activities.py</code>):</strong> Represents a single unit of work, like calling an LLM API (<code>analyze_document_activity</code>) or generating a prompt (<code>generate_prompt_activity</code>). Activities are designed to be idempotent and retriable.</li>
+<li><strong>Worker (<code>run_worker.py</code>):</strong> A process that hosts the Workflow and Activity code, polls the Temporal Cluster for tasks, and executes them. Workers can be scaled horizontally.</li>
+<li><strong>Temporal Cluster:</strong> The backend service (self-hosted or Cloud) that manages workflow state, task queues, timers, and ensures durability and retries.</li>
+</ul>
+<h3 id="heading-the-new-architecture">The New Architecture</h3>
+<ol data-line="33" class="code-line" dir="auto">
+<li><strong>Client (e.g., Streamlit, CLI - <code>start_workflow.py</code>):</strong> Initiates the process by starting the <code>DocumentAnalysisWorkflow</code> via the Temporal Client SDK. It receives a workflow handle but doesn't need to manage the execution itself.</li>
+<li><strong>Temporal Cluster:</strong> Persists the workflow state and schedules tasks.</li>
+<li><strong>Temporal Worker(s):</strong>
+<ul data-line="36" class="code-line" dir="auto">
+<li>Execute the <code>DocumentAnalysisWorkflow</code> logic.</li>
+<li>When the workflow calls <code>workflow.execute_activity(...)</code>, the Cluster schedules the activity task.</li>
+<li>Workers poll for activity tasks (like <code>analyze_document_activity</code>), execute them (calling the LLM APIs), and report results back to the Cluster.</li>
+</ul>
+</li>
+</ol>
+<h3 id="heading-how-temporal-solved-the-challenges">How Temporal Solved the Challenges</h3>
+<ul data-line="42" class="code-line" dir="auto">
+<li><strong>State Management:</strong> Workflow state is automatically persisted by the Temporal Cluster. No manual state handling is needed in the application code for orchestration progress.</li>
+<li><strong>Failure Handling:</strong>
+<ul data-line="44" class="code-line" dir="auto">
+<li><strong>Retries:</strong> Temporal automatically retries failed Activities based on configurable <code>RetryPolicy</code> (e.g., exponential backoff for API timeouts).</li>
+<li><strong>Durability:</strong> If a Worker crashes, the workflow state is safe in the Cluster. Another Worker can pick up and resume execution exactly where it left off.</li>
+</ul>
+</li>
+<li><strong>Scalability:</strong> Workers can be scaled independently to handle increased load. The Cluster manages task distribution. Temporal easily handles long-running tasks without blocking the client.</li>
+<li><strong>Observability:</strong> Temporal Web UI provides detailed visibility into workflow execution history, current state, inputs/outputs of each step, errors, and retry attempts.</li>
+</ul>
+<h2 id="heading-22after223a-migrating-to-temporal-workflows">&quot;After&quot;: Migrating to Temporal Workflows</h2>
+<p>To address these limitations, we migrated the core analysis logic to Temporal. Temporal is an open-source, durable execution system designed for orchestrating long-running, reliable applications.</p><p><strong>(Include simple diagram of the &quot;After&quot; architecture here)</strong></p><h3 id="heading-code-structure-2860after60-version29">Code Structure (<code>After</code> Version)</h3>
+<ul data-line="57" class="code-line" dir="auto">
+<li><strong><code>shared.py</code>:</strong> Dataclasses for workflow inputs/outputs.</li>
+<li><strong><code>activities.py</code>:</strong> Contains functions decorated with <code>@activity.defn</code>. These perform the actual work (e.g., LLM calls, save files).</li>
+<li><strong><code>workflow.py</code>:</strong> Contains the class decorated with <code>@workflow.defn</code>. This orchestrates calls to activities. Note the use of <code>workflow.execute_activity</code> and standard Python <code>asyncio.gather</code> <em>within</em> the workflow definition for parallelism.</li>
+<li><strong><code>run_worker.py</code>:</strong> Script to start a Temporal Worker process that hosts the workflow and activity code.</li>
+<li><strong><code>start_workflow.py</code>:</strong> Example script to trigger the workflow execution using the Temporal client.</li>
+</ul>
+<h3 id="heading-trade-offs">Trade-offs</h3>
+<ul data-line="65" class="code-line" dir="auto">
+<li><strong>User's client/server mappings:</strong>  Extra steps required to map Streamlit and MCP client/server to Temporal server/worker/cluster.</li>
+<li><strong>Infrastructure:</strong> Requires running the Temporal Cluster and Worker processes.</li>
+<li><strong>Learning Curve:</strong> Involves understanding Temporal concepts and SDKs.</li>
+<li><strong>Complexity:</strong> Adds an orchestration layer, which might be overkill for extremely simple tasks but provides immense value for complex, long-running, or critical processes.</li>
+</ul>
+<h2 id="heading-conclusion">Conclusion</h2>
+<p>Migrating the Form 990 analysis task from a script-based approach to Temporal significantly improved its reliability, scalability, and observability. By leveraging Temporal's durable execution guarantees and built-in retry mechanisms, we eliminated complex custom logic for state management and failure handling, allowing developers to focus on the core business logic within Activities. While introducing new infrastructure components, the benefits gained in operational robustness make Temporal a powerful choice for orchestrating complex, multi-step processes like AI agentic workflows.</p><h2 id="heading-running-the-temporal-version-28example29">Running the Temporal Version (Example)</h2>
+<ol data-line="76" class="code-line" dir="auto">
+<li><strong>Setup Temporal:</strong> Start a local Temporal development cluster (e.g., using <code>temporal server start-dev</code>) or connect to Temporal Cloud.</li>
+<li><strong>Install Dependencies:</strong> <code>pip install temporalio pydantic requests anthropic together google-generativeai ...</code></li>
+<li><strong>Set Environment Variables:</strong> Export <code>ANTHROPIC_API_KEY</code>, <code>TOGETHER_API_KEY</code>, <code>GOOGLE_API_KEY</code>.</li>
+<li><strong>Start Server:</strong> temporal server start-dev</li>
+<li><strong>Run Worker:</strong> <code>python run_worker.py</code> (Keep this running in one terminal)</li>
+<li><strong>Start Workflow:</strong> <code>python start_workflow.py</code> (Run in another terminal to trigger an execution)</li>
+<li><strong>Observe:</strong> Monitor progress via the Worker logs and the Temporal Web UI (usually <code>http://localhost:8233</code>).</li>
+</ol>
+
+
+</body>
+</html>

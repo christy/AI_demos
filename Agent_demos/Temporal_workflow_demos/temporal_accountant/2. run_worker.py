@@ -1,13 +1,31 @@
 # run_worker.py
-# Client communicates with User's Application and Temporal Server?
+# Client communicates with User's Application and Temporal Worker
+# 1. from bash, run server with: 
+#    temporal server start-dev --db-filename christy_temporal.db
+# 2. from 2nd bash window, activate env
+# 3. from bash, run worker with: python run_worker.py
+# 4. from 3rd bash window, activate env
+# 5. from bash, run worker with: python run_worker.py
+# DEMO:
+# - copy data folder over
+# - remove intermediate Gemini report
+# - run workflow, observe Gemini rate limit error
+# - observe Temporal retry
+# - observe all reports + final report is generated
 
 import asyncio
 # Import temporal libraries
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio import workflow
 # Import user's application logic
 from workflows import AccountantWorkflow
 from activities import AccountantActivities
+
+# Add pass throughs here, so sandbox does not reimport libraries every time.
+# Standard Python and temporalio import are automatically passed through.
+with workflow.unsafe.imports_passed_through():
+    from activities import AccountantActivities
 
 # TODO: move this to a shared config file
 # Temporal uses task queues to route workflows and activities to worker processes.
@@ -29,7 +47,7 @@ async def main():
         activities.analyze_with_model_activity,
         activities.save_results_activity,
         activities.count_tokens_activity,
-        activities.convert_markdown_to_pdf_activity,
+        activities.save_final_report_activity,
     ]
     
     # Debug: Print all available activity methods

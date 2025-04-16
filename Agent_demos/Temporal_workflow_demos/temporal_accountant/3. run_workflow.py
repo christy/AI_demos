@@ -1,7 +1,9 @@
 # main.py
 # This file is responsible for starting the AccountantWorkflow by submitting it to Temporal.
 # This is the User's Application: requests workflow code execution and handles results.
-# Client communicates with Worker and Server?
+# Client communicates with User's Application and Temporal Worker
+# 4. from 3rd bash window, activate env
+# 5. from bash, run user's workflow with: python run_workflow.py
 
 import asyncio
 import time
