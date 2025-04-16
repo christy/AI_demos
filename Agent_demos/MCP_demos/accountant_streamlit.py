@@ -1,10 +1,10 @@
 # Run this with: streamlit run original_mcp_accountant_streamlit.py
 # Or, if you have uv installed, run with:
 # uv run --active original_mcp_accountant_streamlit.py
-# DEMO
-# remove all final reports
-# remove gemini_results.md
-# Run - expect to see Gemini rate limit error.
+# DEMO:
+# - copy data folder over
+# - remove intermediate Gemini report
+# - run workflow, observe Gemini rate limit error
 
 import streamlit as st
 import markdown
