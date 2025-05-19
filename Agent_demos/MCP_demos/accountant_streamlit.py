@@ -27,7 +27,6 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # Constants
 CLAUDE_MODEL = "claude-3-5-haiku-20241022"
 DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1"
-# GEMINI_MODEL = "gemini-2.0-flash-thinking-exp-01-21" # works!
 GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 OUTPUT_DIR = "demo_mcp_streamlit/output"
 # Final reports will use f{full model name}_final_report.[md|html|pdf]
@@ -394,9 +393,8 @@ async def run_final_report(prompt_file, report_docs: List[str], selected_model: 
     # Map models to clients and output files
     model_to_client = {
         CLAUDE_MODEL: AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None,
-        DEEPSEEK_MODEL: Together(api_key=TOGETHER_API_KEY) if TOGETHER_API_KEY else None,
-        GEMINI_MODEL: genai.Client(),
-        # GEMINI_MODEL: genai.configure(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+        DEEPSEEK_MODEL: Together() if TOGETHER_API_KEY else None,
+        GEMINI_MODEL: genai.Client() if GOOGLE_API_KEY else None,
     }
     
     # Get client and output file for selected model
@@ -445,7 +443,6 @@ if __name__ == "__main__":
     st.sidebar.header("Model Configuration")
     available_models = [CLAUDE_MODEL, DEEPSEEK_MODEL, GEMINI_MODEL]
     # TODO change back to claude later
-    # default_model_index = available_models.index("deepseek-ai/DeepSeek-R1")
     default_model_index = available_models.index(GEMINI_MODEL)
     selected_model = st.sidebar.selectbox(
         "Select LLM Model for Final Report:",
