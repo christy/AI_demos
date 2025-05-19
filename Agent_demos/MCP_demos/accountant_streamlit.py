@@ -1,14 +1,9 @@
+# streamlit_mcp_client_server.py
 # Run this with: streamlit run original_mcp_accountant_streamlit.py
-# Or, if you have uv installed, run with:
+# If you have uv installed, run this with:
 # uv run --active original_mcp_accountant_streamlit.py
-# DEMO:
-# - copy data folder over
-# - remove intermediate Gemini report
-# - run workflow, observe Gemini rate limit error
 
 import streamlit as st
-import markdown
-from weasyprint import HTML
 import os, time, tiktoken, asyncio
 # Anthropic async API doc:  
 # https://github.com/anthropics/anthropic-sdk-python/blob/8b244157a7d03766bec645b0e1dc213c6d462165/README.md?plain=1#L382
@@ -23,51 +18,24 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Output files
-OUTPUT_DIR = "output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)  # Ensure the output directory exists at startup
-
-# Model names dictionary
-MODEL_NAMES = {
-    "claude": "claude-3-5-haiku-20241022",
-    "deepseek": "deepseek-ai/DeepSeek-R1",
-    "gemini": "gemini-2.0-flash-thinking-exp-01-21",
-}
-REVERSE_MODEL_NAMES = {v: k for k, v in MODEL_NAMES.items()}  # Map full model name to short key
-
-# Output files dictionaries (using consistent short model names as keys)
-OUTPUT_FILES = {
-    "claude": os.path.join(OUTPUT_DIR, "claude_results.md"),
-    "deepseek": os.path.join(OUTPUT_DIR, "deepseek_results.md"),
-    "gemini": os.path.join(OUTPUT_DIR, "gemini_results.md"),
-}
-FINAL_REPORT_FILES = {
-    "claude": os.path.join(OUTPUT_DIR, "claude_final_report.md"),
-    "deepseek": os.path.join(OUTPUT_DIR, "deepseek_final_report.md"),
-    "gemini": os.path.join(OUTPUT_DIR, "gemini_final_report.md"),
-}
-FINAL_REPORT_HTML_FILES = {
-    "claude": os.path.join(OUTPUT_DIR, "claude_final_report.html"),
-    "deepseek": os.path.join(OUTPUT_DIR, "deepseek_final_report.html"),
-    "gemini": os.path.join(OUTPUT_DIR, "gemini_final_report.html"),
-}
-FINAL_REPORT_PDF_FILES = {
-    "claude": os.path.join(OUTPUT_DIR, "claude_final_report.pdf"),
-    "deepseek": os.path.join(OUTPUT_DIR, "deepseek_final_report.pdf"),
-    "gemini": os.path.join(OUTPUT_DIR, "gemini_final_report.pdf"),
-}
-
-
-# Global Model-to-Client Map (using consistent short model names as keys)
-CLIENT_MAP = {
-    "claude": AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None,
-    "deepseek": Together(api_key=TOGETHER_API_KEY) if TOGETHER_API_KEY else None,
-    "gemini": genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None,
-}
+# Constants
+CLAUDE_MODEL = "claude-3-5-haiku-20241022"
+DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1"
+# GEMINI_MODEL = "gemini-2.0-flash-thinking-exp-01-21" # works!
+GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
+OUTPUT_DIR = "demo_mcp_streamlit/output"
+# Update file names to match actual files in output directory
+CLAUDE_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "claude_results.md")
+DEEPSEEK_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "deepseek_results.md")
+GEMINI_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "gemini_results.md")
+# Update final report file names to match consistent naming convention
+CLAUDE_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "claude_final_report.md")
+DEEPSEEK_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "deepseek_final_report.md")
+GEMINI_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "gemini_final_report.md")
 
 ## HELPER FUNCTIONS
 
-def load_prompt_resources(prompt_dir="data") -> Dict[str, str]:
+def load_prompt_resources(prompt_dir="demo_mcp_streamlit/data") -> Dict[str, str]:
     """Loads prompt templates from files from the specified directory and returns them as a dictionary."""
     prompt_resources = {}
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -174,40 +142,24 @@ def count_tokens(text: str) -> int:
     except Exception as e:
         return f"Error counting tokens: {str(e)}"
 
-def save_results(model: str, content: str, report_type: str = "analysis") -> None:
-    """Save the analysis or final report results to a markdown file.
+def save_results(output_file: str, model: str, content: str) -> None:
+    """Save the analysis results to a markdown file.
 
     Args:
-        model (str): The short key of the model used for analysis.
+        output_file (str): The name of the output file.
+        model (str): The name of the model used for analysis.
         content (str): The content to save.
-        report_type (str): Either 'analysis' or 'final'.
     """
     try:
+        # Ensure the output directory exists, if not create it.
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        if report_type == "final":
-            filepath = FINAL_REPORT_FILES[model]
-        else:
-            filepath = OUTPUT_FILES[model]
-        with open(filepath, "w") as f:
+
+        # Save file, either new or replaced.
+        with open(output_file, "w") as f:
+            f.write(f"# {model} Analysis Results\n\n")
             f.write(content)
     except Exception as e:
-        st.error(f"Error saving results to {filepath}: {str(e)}")
-
-def save_final_report_all_formats(model_key: str, content_md: str) -> None:
-    """Save the final report as Markdown, HTML, and PDF for the given model key."""
-    try:
-        # 1. Save Markdown
-        save_results(model_key, content_md, report_type="final")
-        # 2. Convert to HTML
-        html_content = markdown.markdown(content_md)
-        html_path = FINAL_REPORT_HTML_FILES[model_key]
-        with open(html_path, "w") as f:
-            f.write(html_content)
-        # 3. Convert HTML to PDF
-        pdf_path = FINAL_REPORT_PDF_FILES[model_key]
-        HTML(string=html_content).write_pdf(pdf_path)
-    except Exception as e:
-        st.error(f"Error saving final report in all formats for {model_key}: {str(e)}")
+        st.error(f"Error saving results to {output_file}: {str(e)}")
 
 def display_report(report_content: str, report_type: str, is_error: bool = False, is_cached: bool = False) -> None:
     """Display a report in Streamlit.
@@ -244,19 +196,38 @@ async def run_analysis(prompt: str):
     tasks = []
     results = []
     report_docs = []
-    
-    # # DEBUG: choose only a few models
-    # models = {
-    #     "claude": "claude-3-5-haiku-20241022",
-    #     # "deepseek": "deepseek-ai/DeepSeek-R1",
-    #     # "gemini": "gemini-2.0-flash-thinking-exp-01-21",
-    # }
-    # for name, model in models.items():
 
-    # If not DEBUG, add all LLM calls to tasks list
-    for name, model in MODEL_NAMES.items():
-        client = CLIENT_MAP.get(name)
-        output_file = OUTPUT_FILES.get(name)
+    # Initialize which models to use in analysis step
+    models = {
+        "claude": CLAUDE_MODEL,
+        "deepseek": DEEPSEEK_MODEL,
+        "gemini": GEMINI_MODEL,
+    }
+    # Initialize clients outside the loop
+    # anthropic not async API
+    # anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+    # anthropic async API
+    anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+    together_client = Together(api_key=TOGETHER_API_KEY) if TOGETHER_API_KEY else None
+    google_client = genai.Client() if GOOGLE_API_KEY else None
+                        
+    client_map = {
+        "claude": anthropic_client,
+        "deepseek": together_client,
+        "gemini": google_client,
+    }
+
+    # Map model names to output files
+    output_file_map = {
+        "claude": CLAUDE_OUTPUT_FILE,
+        "deepseek": DEEPSEEK_OUTPUT_FILE,
+        "gemini": GEMINI_OUTPUT_FILE,
+    }
+    
+    # Add all LLM calls to tasks list
+    for name, model in models.items():
+        client = client_map.get(name)
+        output_file = output_file_map.get(name)
         
         # Check if output file already exists
         if os.path.exists(output_file):
@@ -295,10 +266,14 @@ async def run_analysis(prompt: str):
 
     st.info(f"Finished! Got {len(results)} LLM results.")
 
+    # Save each individual LLM response in its own output file
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
     # Assemble all LLM responses together for the final report prompt
     for result in results:
         if result:
-            name = result.get("model_name", "Unknown")
+            name = result.get("model_name", "Unknown") # Try to get model name
             is_cached = result.get("cached", False)
             if is_cached:
                 st.subheader(f"{name.capitalize()} Analysis (Loaded from Cache)")
@@ -314,10 +289,9 @@ async def run_analysis(prompt: str):
                 else:
                     st.info(f"{name.capitalize()} took {duration:.2f} seconds.")
                 content = result.get("content", "")
-                # Save the result to a file
-                filepath = OUTPUT_FILES.get(name) # Use OUTPUT_FILES dictionary
-                # DEBUG: todo delete this
-                print(f"Saving {name.capitalize()} result to {filepath}")
+                # Save the result to a file using consistent naming
+                filename = f"{name}_results.md"  # Simplified naming to match our constants
+                filepath = output_file_map.get(name)  # Use the same file path defined in our map
                 try:
                     with open(filepath, "w") as f:
                         f.write(f"# {name.capitalize()} Analysis Result\n\n")
@@ -360,6 +334,7 @@ async def analyze_with_model(client: Any, prompt: str, model: str, model_name: s
             return {"content": content, "duration": time.time() - start_time, "error": None, "model_name": model_name}
 
         else:  #Google
+            # Not async API
             # response = await client.generate_content_async( # Corrected to *_async
             #     contents=[prompt],
             #     generation_config=types.GenerationConfig(
@@ -367,6 +342,7 @@ async def analyze_with_model(client: Any, prompt: str, model: str, model_name: s
             #         temperature=0.5
             #     )
             # )
+            # async API
             response = await client.aio.models.generate_content(
                     model=model, 
                     contents=[prompt],
@@ -382,6 +358,8 @@ async def analyze_with_model(client: Any, prompt: str, model: str, model_name: s
                     first_part = first_candidate.content.parts[0]
                     if hasattr(first_part, 'text') and first_part.text:
                         content = first_part.text
+            else:
+                print(f"DEBUG: {response.text[:50]}")
             return {"content": content, "duration": time.time() - start_time, "error": None, "model_name": model_name}
 
 
@@ -405,16 +383,35 @@ async def run_final_report(prompt_file, report_docs: List[str], selected_model: 
     with st.expander("View Final Report Prompt", expanded=False):
         st.markdown(final_report_prompt)
 
-    # Map full model name to short key
-    short_key = REVERSE_MODEL_NAMES.get(selected_model)
-    if not short_key:
-        st.error(f"Unsupported model selected for final report: {selected_model}")
-        return {"error": f"Unsupported model selected for final report: {selected_model}", "content": ""}
-    client = CLIENT_MAP.get(short_key)
-    output_file = FINAL_REPORT_FILES.get(short_key)
+    # Map models to clients and output files
+    model_to_client = {
+        CLAUDE_MODEL: AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None,
+        DEEPSEEK_MODEL: Together(api_key=TOGETHER_API_KEY) if TOGETHER_API_KEY else None,
+        GEMINI_MODEL: genai.Client(),
+        # GEMINI_MODEL: genai.configure(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+    }
+    
+    # Map models to final report files
+    model_to_output_file = {
+        CLAUDE_MODEL: CLAUDE_FINAL_REPORT_FILE,
+        DEEPSEEK_MODEL: DEEPSEEK_FINAL_REPORT_FILE,
+        GEMINI_MODEL: GEMINI_FINAL_REPORT_FILE
+    }
+    
+    # Get client and output file for selected model
+    client = model_to_client.get(selected_model)
+    output_file = model_to_output_file.get(selected_model)
+    
+    # Check if model is supported
     if not client or not output_file:
         st.error(f"Unsupported model selected for final report: {selected_model}")
         return {"error": f"Unsupported model selected for final report: {selected_model}", "content": ""}
+
+    # This check is now redundant since we already check for client in the previous if statement
+    # But keeping a specific error message for missing API keys is helpful
+    if not client and selected_model in [CLAUDE_MODEL, DEEPSEEK_MODEL, GEMINI_MODEL]:
+        st.error(f"API key missing for selected model: {selected_model}")
+        return {"error": f"API key missing for selected model: {selected_model}", "content": ""}
     
     # Check if output file already exists
     if os.path.exists(output_file):
@@ -430,7 +427,7 @@ async def run_final_report(prompt_file, report_docs: List[str], selected_model: 
     st.info(f"Calling {selected_model} API to generate content...")
     final_report_result = await analyze_with_model(client, final_report_prompt, selected_model, selected_model) 
     if not final_report_result.get("error"):
-        save_final_report_all_formats(selected_model_key, final_report_result["content"])
+        save_results(output_file, selected_model, final_report_result["content"])
         # Don't display the report here, let the caller handle it with display_report
     return final_report_result
 
@@ -441,22 +438,20 @@ if __name__ == "__main__":
     # Load prompt resources at the start
     if 'prompt_resources' not in st.session_state:
         st.session_state.prompt_resources = \
-            load_prompt_resources(prompt_dir="data")
+            load_prompt_resources(prompt_dir="demo_mcp_streamlit/data")
 
     # Sidebar for Model Selection
     st.sidebar.header("Model Configuration")
-    # Use short keys for model selection
-    available_models = list(MODEL_NAMES.values())
-    default_model_index = available_models.index(MODEL_NAMES["claude"])
+    available_models = [CLAUDE_MODEL, DEEPSEEK_MODEL, GEMINI_MODEL]
+    # TODO change back to claude later
+    # default_model_index = available_models.index("deepseek-ai/DeepSeek-R1")
+    default_model_index = available_models.index(GEMINI_MODEL)
     selected_model = st.sidebar.selectbox(
         "Select LLM Model for Final Report:",
         available_models,
         index=default_model_index,
         key="selected_model"
     )
-    # Compute short key from selected model (full name)
-    selected_model_key = {v: k for k, v in MODEL_NAMES.items()}[selected_model]
-    # Use selected_model_key for all downstream logic (e.g., save_results(selected_model_key, ...))
 
     # Get the number of documents to analyze from the user
     num_docs = st.number_input(
@@ -465,7 +460,7 @@ if __name__ == "__main__":
     )
 
     # Get default doc texts.
-    default_texts = [read_file(f"data/test_i990_{year}_pdf.txt")
+    default_texts = [read_file(f"demo_mcp_streamlit/data/test_i990_{year}_pdf.txt")
                      for year in range(2020, 2024)]
     # Get doc texts from user if any, override defaults.
     docs = get_form_990_texts_from_input(num_docs, default_texts)
