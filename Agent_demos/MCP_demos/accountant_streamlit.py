@@ -2,8 +2,14 @@
 # Run this with: streamlit run original_mcp_accountant_streamlit.py
 # If you have uv installed, run this with:
 # uv run --active original_mcp_accountant_streamlit.py
+# DEMO:
+# - copy data folder over
+# - remove intermediate Gemini report
+# - run workflow, observe Gemini rate limit error
 
 import streamlit as st
+import markdown
+from weasyprint import HTML
 import os, time, tiktoken, asyncio
 # Anthropic async API doc:  
 # https://github.com/anthropics/anthropic-sdk-python/blob/8b244157a7d03766bec645b0e1dc213c6d462165/README.md?plain=1#L382
@@ -24,14 +30,11 @@ DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1"
 # GEMINI_MODEL = "gemini-2.0-flash-thinking-exp-01-21" # works!
 GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 OUTPUT_DIR = "demo_mcp_streamlit/output"
-# Update file names to match actual files in output directory
+# Final reports will use f{full model name}_final_report.[md|html|pdf]
+# Intermediate reports will use short model names in output directory
 CLAUDE_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "claude_results.md")
 DEEPSEEK_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "deepseek_results.md")
 GEMINI_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "gemini_results.md")
-# Update final report file names to match consistent naming convention
-CLAUDE_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "claude_final_report.md")
-DEEPSEEK_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "deepseek_final_report.md")
-GEMINI_FINAL_REPORT_FILE = os.path.join(OUTPUT_DIR, "gemini_final_report.md")
 
 ## HELPER FUNCTIONS
 
@@ -142,24 +145,29 @@ def count_tokens(text: str) -> int:
     except Exception as e:
         return f"Error counting tokens: {str(e)}"
 
-def save_results(output_file: str, model: str, content: str) -> None:
-    """Save the analysis results to a markdown file.
-
-    Args:
-        output_file (str): The name of the output file.
-        model (str): The name of the model used for analysis.
-        content (str): The content to save.
-    """
+def save_final_report_all_formats(model_name: str, content_md: str) -> None:
+    """Save the final report as Markdown, HTML, and PDF for the given model name."""
     try:
-        # Ensure the output directory exists, if not create it.
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-        # Save file, either new or replaced.
-        with open(output_file, "w") as f:
-            f.write(f"# {model} Analysis Results\n\n")
-            f.write(content)
+        # 1. Save Markdown
+        md_file = os.path.join(OUTPUT_DIR, f"{model_name}_final_report.md")
+        with open(md_file, "w") as f:
+            f.write(f"# {model_name} Final Report\n\n")
+            f.write(content_md)
+            
+        # 2. Convert to HTML
+        html_content = markdown.markdown(content_md)
+        html_file = os.path.join(OUTPUT_DIR, f"{model_name}_final_report.html")
+        with open(html_file, "w") as f:
+            f.write(html_content)
+            
+        # 3. Convert HTML to PDF
+        pdf_file = os.path.join(OUTPUT_DIR, f"{model_name}_final_report.pdf")
+        HTML(string=html_content).write_pdf(pdf_file)
+        
+        st.success(f"Final report saved in all formats for {model_name}")
+        
     except Exception as e:
-        st.error(f"Error saving results to {output_file}: {str(e)}")
+        st.error(f"Error saving final report in all formats for {model_name}: {str(e)}")
 
 def display_report(report_content: str, report_type: str, is_error: bool = False, is_cached: bool = False) -> None:
     """Display a report in Streamlit.
@@ -391,19 +399,11 @@ async def run_final_report(prompt_file, report_docs: List[str], selected_model: 
         # GEMINI_MODEL: genai.configure(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
     }
     
-    # Map models to final report files
-    model_to_output_file = {
-        CLAUDE_MODEL: CLAUDE_FINAL_REPORT_FILE,
-        DEEPSEEK_MODEL: DEEPSEEK_FINAL_REPORT_FILE,
-        GEMINI_MODEL: GEMINI_FINAL_REPORT_FILE
-    }
-    
     # Get client and output file for selected model
     client = model_to_client.get(selected_model)
-    output_file = model_to_output_file.get(selected_model)
     
     # Check if model is supported
-    if not client or not output_file:
+    if not client:
         st.error(f"Unsupported model selected for final report: {selected_model}")
         return {"error": f"Unsupported model selected for final report: {selected_model}", "content": ""}
 
@@ -414,21 +414,22 @@ async def run_final_report(prompt_file, report_docs: List[str], selected_model: 
         return {"error": f"API key missing for selected model: {selected_model}", "content": ""}
     
     # Check if output file already exists
-    if os.path.exists(output_file):
-        st.success(f"Using existing output file: {output_file}")
-        content = read_file(output_file)
+    md_file = os.path.join(OUTPUT_DIR, f"{selected_model}_final_report.md")
+    if os.path.exists(md_file):
+        st.success(f"Using existing output file: {md_file}")
+        content = read_file(md_file)
         if content:
             # Don't display the report here, let the caller handle it with display_report
             return {"content": content, "duration": 0, "error": None, "model_name": selected_model, "cached": True}
         else:
-            st.warning(f"Existing file {output_file} is empty or couldn't be read. Generating new content.")
+            st.warning(f"Existing file {md_file} is empty or couldn't be read. Generating new content.")
     
     # If file doesn't exist or couldn't be read, call the LLM
     st.info(f"Calling {selected_model} API to generate content...")
     final_report_result = await analyze_with_model(client, final_report_prompt, selected_model, selected_model) 
     if not final_report_result.get("error"):
-        save_results(output_file, selected_model, final_report_result["content"])
-        # Don't display the report here, let the caller handle it with display_report
+        # Save in all formats
+        save_final_report_all_formats(selected_model, final_report_result["content"])
     return final_report_result
 
 if __name__ == "__main__":
@@ -520,4 +521,4 @@ if __name__ == "__main__":
                     with st.expander("View Final Report", expanded=True):
                         st.markdown(final_report_result.get("content", ""))
                     
-                    st.info("The final report has been saved.")
+                    st.info("The final reports (.md, .html, and .pdf) have been saved in the output folder.")
